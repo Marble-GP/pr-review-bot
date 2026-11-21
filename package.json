@@ -1,0 +1,20 @@
+{
+  "name": "prbot",
+  "version": "1.0.0",
+  "description": "GitHub PR 自動レビュー (OpenCode ベース) — CLI インストールウィザード付き",
+  "type": "module",
+  "bin": {
+    "prbot": "./bin/prbot.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.mjs",
+    "init": "node bin/prbot.mjs init",
+    "doctor": "node bin/prbot.mjs doctor"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": ["pr", "review", "opencode", "github", "cli"],
+  "license": "MIT",
+  "dependencies": {}
+}

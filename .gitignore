@@ -1,0 +1,10 @@
+﻿# prbot generated files (created by prbot init)
+.prbot/
+.prbot.json
+opencode.jsonc
+AGENTS.md
+.github/workflows/prbot-review.yml
+
+# node
+node_modules/
+npm-debug.log*
