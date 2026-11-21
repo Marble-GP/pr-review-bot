@@ -34,11 +34,19 @@ function warn(m) { console.log(`${c.yellow}  ⚠${c.reset} ${m}`); }
 function fail(m) { console.log(`${c.red}  ✗${c.reset} ${m}`); }
 function info(m) { console.log(`${c.dim}    ${m}${c.reset}`); }
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+// readline は対話実行時のみ生成する（テスト等で import してもプロセスを保持しない）
+let rl = null;
+function getRl() {
+  if (!rl) rl = createInterface({ input: process.stdin, output: process.stdout });
+  return rl;
+}
+function closeRl() {
+  if (rl) { rl.close(); rl = null; }
+}
 function ask(q, def) {
   return new Promise((res) => {
     const suffix = def !== undefined ? ` [${def}]` : "";
-    rl.question(`${c.cyan}?${c.reset} ${q}${suffix}: `, (a) => {
+    getRl().question(`${c.cyan}?${c.reset} ${q}${suffix}: `, (a) => {
       const v = a.trim();
       res(v === "" ? def : v);
     });
@@ -48,7 +56,7 @@ function askChoice(q, choices, defIdx = 0) {
   return new Promise((res) => {
     console.log(`${c.cyan}?${c.reset} ${q}`);
     choices.forEach((ch, i) => console.log(`    ${i + 1}. ${ch.label}${ch.hint ? c.dim + "  " + ch.hint + c.reset : ""}`));
-    rl.question(`  番号を入力 [${defIdx + 1}]: `, (a) => {
+    getRl().question(`  番号を入力 [${defIdx + 1}]: `, (a) => {
       const n = parseInt(a.trim() || String(defIdx + 1), 10);
       const idx = Number.isNaN(n) ? defIdx : n - 1;
       res(choices[Math.max(0, Math.min(choices.length - 1, idx))]);
@@ -57,7 +65,7 @@ function askChoice(q, choices, defIdx = 0) {
 }
 function askYesNo(q, def = true) {
   return new Promise((res) => {
-    rl.question(`${c.cyan}?${c.reset} ${q} [${def ? "Y/n" : "y/N"}]: `, (a) => {
+    getRl().question(`${c.cyan}?${c.reset} ${q} [${def ? "Y/n" : "y/N"}]: `, (a) => {
       const v = a.trim().toLowerCase();
       if (v === "") res(def);
       else res(v === "y" || v === "yes" || v === "はい");
@@ -210,15 +218,23 @@ function writeOpencodeConfig() {
   "$schema": "https://opencode.ai/config.json",
   "model": "{env:OPENCODE_MODEL}",
   "permissions": [
+    { "action": "external_directory", "resource": "*", "effect": "deny" },
+    { "action": "external_directory", "resource": "$HOME/.opencode/plan/*", "effect": "allow" },
     { "action": "read", "resource": "*", "effect": "allow" },
+    { "action": "read", "resource": "*.env", "effect": "deny" },
+    { "action": "read", "resource": "*.env.*", "effect": "deny" },
+    { "action": "read", "resource": "*.pem", "effect": "deny" },
+    { "action": "read", "resource": "*.key", "effect": "deny" },
     { "action": "glob", "resource": "*", "effect": "allow" },
     { "action": "grep", "resource": "*", "effect": "allow" },
-    { "action": "shell", "resource": "git status *", "effect": "allow" },
-    { "action": "shell", "resource": "git diff *", "effect": "allow" },
-    { "action": "shell", "resource": "gh pr *", "effect": "allow" },
-    { "action": "shell", "resource": "gh auth *", "effect": "allow" },
+    { "action": "shell", "resource": "*", "effect": "deny" },
+    { "action": "webfetch", "resource": "*", "effect": "deny" },
+    { "action": "websearch", "resource": "*", "effect": "deny" },
     { "action": "edit", "resource": "*", "effect": "deny" },
-    { "action": "write", "resource": "*", "effect": "deny" }
+    { "action": "subagent", "resource": "*", "effect": "deny" },
+    { "action": "skill", "resource": "*", "effect": "deny" },
+    { "action": "question", "resource": "*", "effect": "deny" },
+    { "action": "execute", "resource": "*", "effect": "deny" }
   ]
 }
 `;
@@ -264,10 +280,19 @@ function writeWorkflow(config) {
     warn(".github/workflows/prbot-review.yml が既に存在するため上書きしません");
     return;
   }
-  const content = `name: prbot PR Review
+  const content = `# prbot PR Review
+#
+# 信頼モデル:
+# - pull_request_target を使い、ワークフロー定義は常にベースブランチ側のものを使う。
+#   PR 側でこのワークフローを書き換えても、マージされるまで実行されない。
+# - チェックアウトするのはベースコミットのみ。PR のコードはチェックアウトも実行もしない。
+#   PR の差分は gh pr diff でテキストとして取得するだけ。
+# - フォークからの PR には Secrets と書き込みトークンを与えないため、既定でスキップする。
+#   （フォーク PR もレビューしたい場合は if 条件を外す前に必ず脅威モデルを確認すること）
+name: prbot PR Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -276,13 +301,17 @@ permissions:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout trusted base commit
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: \${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -380,7 +409,7 @@ async function main() {
   console.log("");
 
   await testRun(config);
-  rl.close();
+  closeRl();
 }
 
 // export for testing
