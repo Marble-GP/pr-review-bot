@@ -7,7 +7,7 @@ OpenCode CLI を利用して GitHub Pull Request を自動レビューするツ�
 
 - **CLI インストールウィザード** (`prbot init`) — 前提条件チェック、対話設定、ファイル生成まで一括
 - **PR のコードを実行しない** — ベースコミットのみチェックアウトし、差分はテキストとして取得
-- **最小権限** — OpenCode の permissions でシェル/ネットワーク/ファイル編集を禁止
+- **最小権限** — deny 権限を `prbot-review` 専用エージェントにのみ適用（開発セッションへの影響なし）
 - **トークン分離** — `GH_TOKEN` は OpenCode 子プロセスに渡さない
 - **差分フィルタリング** — lockfile 等の除外、サイズ上限での切り捨て
 - **dry-run** — ローカルでレビュー結果を確認してから投稿
@@ -55,8 +55,7 @@ prbot init
 | `.prbot.json` | prbot 設定 |
 | `.prbot/review.mjs` | レビューランナー |
 | `.prbot/lib/*.mjs` | ランナー依存モジュール |
-| `opencode.jsonc` | OpenCode 権限設定 (最小権限) |
-| `AGENTS.md` | レビュー方針 |
+| `.opencode/agents/prbot-review.md` | prbot 専用エージェント（権限はこのエージェントのみに適用） |
 | `.github/workflows/prbot-review.yml` | 自動実行 (Actions 選択時) |
 
 ### 2. GitHub Secrets の登録
@@ -67,7 +66,7 @@ prbot init
 ### 3. コミット & PR 作成
 
 ```bash
-git add .prbot .prbot.json opencode.jsonc AGENTS.md .github
+git add .prbot .prbot.json .opencode .github
 git commit -m "chore: add prbot"
 git push
 ```
@@ -111,8 +110,9 @@ prbot doctor
 
 ## レビュー観点のカスタマイズ
 
-`AGENTS.md` を編集することで、レビュー観点や出力形式をカスタマイズできます。
-OpenCode はこのファイルを自動的に読み込みます。
+`.opencode/agents/prbot-review.md` の本文（システムプロンプト）を編集することで、
+レビュー観点や出力形式をカスタマイズできます。このファイルの permissions は
+`prbot-review` エージェントにのみ適用され、通常の開発セッションには影響しません。
 
 ## セキュリティ
 
@@ -140,9 +140,11 @@ PR のコードは **チェックアウトも実行もしません**。生成さ
 これにより、レビュー対象 diff に含まれる悪意ある指示（プロンプトインジェクション）で
 GitHub トークンを窃取・悪用されることはありません。
 
-### OpenCode の権限
+### OpenCode の権限（prbot 専用エージェントにスコープ）
 
-生成される `opencode.jsonc` では次を禁止しています。
+権限はプロジェクトルートの設定ファイルには書きません。
+`.opencode/agents/prbot-review.md` として prbot 専用エージェントを定義し、
+そのエージェントにのみ次の deny を適用します。
 
 - `shell` / `execute` — 任意コマンド実行
 - `webfetch` / `websearch` — 外部ネットワークアクセス
@@ -155,6 +157,12 @@ GitHub トークンを窃取・悪用されることはありません。
 作業ファイル（指示文・差分）は `.prbot/work/` に作成し、プロジェクト外へは出ません
 （`.prbot/work/` は `.gitignore` に追加されます）。
 
+> **なぜエージェントスコープか**: OpenCode はプロジェクトルートの `opencode.jsonc` を
+> そのディレクトリで開く**すべてのセッション**に適用します。v1.0.x はここに deny を
+> 書いていたため、人間の開発セッションから shell / edit / execute が奪われる問題が
+> ありました。v1.1 以降は `prbot-review` エージェント専用の権限定義のみを生成し、
+> `opencode.jsonc` と `AGENTS.md` は作成しません。
+
 ### 残るリスク
 
 - LLM プロバイダへの送信内容（差分とリポジトリの一部ファイル）は外部サービスに渡ります。
@@ -162,6 +170,25 @@ GitHub トークンを窃取・悪用されることはありません。
 - 同一リポジトリ内の PR 作成者はレビュー結果を通じて API 利用量を消費できます。
 - `OPENCODE_API_KEY` などの Secret は Organization Secrets で一元管理し、
   必要最小限のリポジトリにのみスコープしてください。
+
+## v1.0.x からの移行
+
+旧版はプロジェクトルートに `opencode.jsonc`（permissions 全体に適用）と `AGENTS.md`
+（全エージェントに「編集禁止」を指示）を生成していました。これらは
+**そのディレクトリで開く開発セッションすべてに適用される**ため、以下を実行してください。
+
+```bash
+# 1. prbot が生成したファイルを削除（自分で書いた内容があれば中身を確認してから）
+#    - opencode.jsonc に permissions の deny が含まれている場合
+#    - AGENTS.md が「PR Review Bot — レビュー方針」で始まる場合
+# 2. 最新版で再生成
+prbot init
+# 3. 差分をコミット
+git add .opencode .prbot .prbot.json .github
+git commit -m "chore: migrate prbot to agent-scoped permissions"
+```
+
+`prbot doctor` は旧版生成物を検出して警告します。
 
 
 ## トラブルシューティング

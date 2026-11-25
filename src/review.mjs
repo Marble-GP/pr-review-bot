@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // prbot review runner
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -88,11 +88,19 @@ export async function runReview(options) {
     writeFileSync(diffPath, diffText, "utf8");
 
     log(`PR #${meta.number} をレビュー中（model: ${config.model}）`);
+    // prbot 専用エージェント（.opencode/agents/prbot-review.md）を使用する。
+    // 権限はこのエージェントにのみ適用され、開発セッションには影響しない。
+    const agentFile = join(process.cwd(), ".opencode", "agents", "prbot-review.md");
+    if (!existsSync(agentFile)) {
+      throw new Error(
+        ".opencode/agents/prbot-review.md が見つかりません。\n" +
+        "`prbot init` を実行して生成し、コミットしてください。");
+    }
     // OpenCode には最小限の環境変数のみを渡す。
     // GH_TOKEN / GITHUB_TOKEN は含めないため、diff 経由のプロンプトインジェクションで
     // トークンを窃取・悪用されることはない。
     const run = sh("opencode", [
-      "run", "--standalone", "--auto", "--agent", "plan", "--model", config.model,
+      "run", "--standalone", "--auto", "--agent", "prbot-review", "--model", config.model,
       "--file", instructionsPath, "--file", diffPath,
       "Follow the attached instructions and review the attached diff.",
     ], { timeout: config.timeoutMinutes * 60 * 1000, env: buildOpencodeEnv(config.model) });

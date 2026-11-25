@@ -1,6 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,7 @@ const dir = mkdtempSync(join(tmpdir(), "prbot-wf-"));
 const originalCwd = process.cwd();
 process.chdir(dir);
 
-const { writeWorkflow, writeOpencodeConfig } = await import("../src/wizard.mjs");
+const { writeWorkflow, writeAgentFile } = await import("../src/wizard.mjs");
 
 after(() => {
   process.chdir(originalCwd);
@@ -34,16 +34,36 @@ test("generated workflow runs the trusted base commit only", () => {
   assert.match(wf, /secrets\.OPENCODE_API_KEY/);
 });
 
-test("generated opencode config denies shell/network/edit/execute", () => {
-  writeOpencodeConfig();
-  const cfg = readFileSync(join(dir, "opencode.jsonc"), "utf8");
+test("review permissions live in a dedicated agent file, not project config", () => {
+  writeAgentFile({ language: "ja" });
+  const agent = readFileSync(join(dir, ".opencode/agents/prbot-review.md"), "utf8");
 
-  for (const action of ["external_directory", "shell", "webfetch", "websearch", "edit", "subagent", "skill", "execute"]) {
+  assert.match(agent, /^---\n/);
+  assert.match(agent, /mode: primary/);
+  for (const action of [
+    "external_directory", "shell", "webfetch", "websearch",
+    "edit", "subagent", "skill", "question", "execute",
+  ]) {
     assert.match(
-      cfg,
-      new RegExp(`"action": "${action}", "resource": "\\*", "effect": "deny"`),
-      `permissions must deny ${action}`,
+      agent,
+      new RegExp(`action: ${action}\\s*\\n\\s*resource: "\\*"\\s*\\n\\s*effect: deny`),
+      `prbot-review agent must deny ${action}`,
     );
   }
-  assert.match(cfg, /"action": "read", "resource": "\*\.env", "effect": "deny"/);
+  assert.match(agent, /resource: "\*\.env"/);
+  assert.match(agent, /resource: "\*\.pem"/);
+
+  // 開発セッションに影響するルート直下の設定ファイルは生成しない
+  // （旧版はルートの opencode.jsonc に permissions を書き、開発セッションから
+  //   shell / edit / execute を奪う事故を起こしていた）
+  assert.equal(existsSync(join(dir, "opencode.jsonc")), false, "must not create root opencode.jsonc");
+  assert.equal(existsSync(join(dir, "AGENTS.md")), false, "must not create root AGENTS.md");
+});
+
+test("runner launches the dedicated prbot-review agent", () => {
+  const src = readFileSync(new URL("../src/review.mjs", import.meta.url), "utf8");
+  assert.match(src, /"prbot-review"/);
+  assert.doesNotMatch(src, /--agent", "plan"/);
+  // エージェント定義ファイルがない場合は事前に明確なエラーを出す
+  assert.match(src, /prbot-review\.md が見つかりません/);
 });

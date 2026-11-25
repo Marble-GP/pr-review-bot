@@ -2,7 +2,7 @@
 // prbot CLI
 import { parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -96,10 +96,35 @@ async function main() {
     console.log(`  設定ファイル: ${existsSync(cfgPath) ? "存在" : "未作成 (prbot init を実行)"}`);
     const runnerPath = join(ROOT, ".prbot", "review.mjs");
     console.log(`  ランナー:     ${existsSync(runnerPath) ? "存在" : "未作成"}`);
+    const agentPath = join(ROOT, ".opencode", "agents", "prbot-review.md");
+    console.log(`  レビューエージェント: ${existsSync(agentPath) ? "存在" : "未作成"}`);
     const wfPath = join(ROOT, ".github", "workflows", "prbot-review.yml");
     console.log(`  ワークフロー: ${existsSync(wfPath) ? "存在" : "未作成"}`);
     const ghAuth = sh("gh", ["auth", "status"]);
     console.log(`  gh 認証:     ${ghAuth.status === 0 ? "OK" : "未認証 (gh auth login)"}`);
+    // 旧版（v1.0.x）が生成したプロジェクトルートの設定ファイルを検出して警告する
+    const legacyCfg = join(ROOT, "opencode.jsonc");
+    if (existsSync(legacyCfg)) {
+      const legacy = readFileSync(legacyCfg, "utf8");
+      if (legacy.includes("\"permissions\"") && legacy.includes("\"effect\": \"deny\"")) {
+        console.log("");
+        console.log(`  警告: opencode.jsonc に permissions があります。`);
+        console.log(`        プロジェクトルートの opencode.jsonc はそのディレクトリの全セッションに適用されるため、`);
+        console.log(`        開発セッションの shell/edit/execute まで拒否されます。`);
+        console.log(`        prbot v1.1+ は .opencode/agents/prbot-review.md に権限を定義します。`);
+        console.log(`        prbot が生成した opencode.jsonc であれば削除し、prbot init を再実行してください。`);
+      }
+    }
+    const agentsMd = join(ROOT, "AGENTS.md");
+    if (existsSync(agentsMd)) {
+      const cur = readFileSync(agentsMd, "utf8");
+      if (cur.includes("PR Review Bot")) {
+        console.log("");
+        console.log(`  警告: AGENTS.md は prbot 旧版が生成したものです。`);
+        console.log(`        開発セッションにも「編集禁止」が適用されるため削除してください。`);
+        console.log(`        レビュー方針は .opencode/agents/prbot-review.md に移動しました。`);
+      }
+    }
     return;
   }
 

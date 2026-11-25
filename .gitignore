@@ -1,9 +1,11 @@
 ﻿# prbot generated files (created by prbot init)
 .prbot/
 .prbot.json
+.github/workflows/prbot-review.yml
+
+# legacy v1.0.x artifacts (no longer generated; remove from your repos)
 opencode.jsonc
 AGENTS.md
-.github/workflows/prbot-review.yml
 
 # node
 node_modules/
